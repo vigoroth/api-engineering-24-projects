@@ -1,0 +1,43 @@
+# Live exchanges against uvicorn (P02), 2026-11-05 16:21 GTBST
+# Server: python -m uvicorn app.main:app --host 127.0.0.1 --port 8002 --no-access-log --log-config logging.json
+# Client: curl 8.21.0
+# Format: <label>  <request body or path>  ->  <response body>  [status]
+
+## POST /quotes
+T01 happy path               {"unit_price": "0.10", "quantity": 3}          -> {"total":"0.30"}  [200]
+R03 half-up rounding         {"unit_price": "0.125", "quantity": 1}         -> {"total":"0.13"}  [200]
+T02 quantity 0               {"unit_price": "0.10", "quantity": 0}          -> {"detail":[{"type":"greater_than_equal","loc":["body","quantity"],"msg":"Input should be greater than or equal to 1","input":0,"ctx":{"ge":1}}]}  [422]
+T03 quantity 2.5             {"unit_price": "0.10", "quantity": 2.5}        -> {"detail":[{"type":"int_type","loc":["body","quantity"],"msg":"Input should be a valid integer","input":2.5}]}  [422]
+R03 strict: quantity "3"     {"unit_price": "0.10", "quantity": "3"}        -> {"detail":[{"type":"int_type","loc":["body","quantity"],"msg":"Input should be a valid integer","input":"3"}]}  [422]
+R03 strict: quantity 3.0     {"unit_price": "0.10", "quantity": 3.0}        -> {"detail":[{"type":"int_type","loc":["body","quantity"],"msg":"Input should be a valid integer","input":3.0}]}  [422]
+R02 quantity absent          {"unit_price": "0.10"}                         -> {"detail":[{"type":"missing","loc":["body","quantity"],"msg":"Field required","input":{"unit_price":"0.10"}}]}  [422]
+R02 quantity null            {"unit_price": "0.10", "quantity": null}       -> {"detail":[{"type":"int_type","loc":["body","quantity"],"msg":"Input should be a valid integer","input":null}]}  [422]
+T05 price absent             {"quantity": 3}                                -> {"detail":[{"type":"missing","loc":["body","unit_price"],"msg":"Field required","input":{"quantity":3}}]}  [422]
+R04 quantity 1000 (edge)     {"unit_price": "0.10", "quantity": 1000}       -> {"total":"100.00"}  [200]
+R04 quantity 1001            {"unit_price": "0.10", "quantity": 1001}       -> {"detail":[{"type":"less_than_equal","loc":["body","quantity"],"msg":"Input should be less than or equal to 1000","input":1001,"ctx":{"le":1000}}]}  [422]
+R04 price -0.01              {"unit_price": "-0.01", "quantity": 1}         -> {"detail":[{"type":"greater_than_equal","loc":["body","unit_price"],"msg":"Input should be greater than or equal to 0","input":"-0.01","ctx":{"ge":0}}]}  [422]
+R04 price 1e100 (was 500)    {"unit_price": "1e100", "quantity": 1}         -> {"detail":[{"type":"decimal_max_digits","loc":["body","unit_price"],"msg":"Decimal input should have no more than 12 digits in total","input":"1e100","ctx":{"max_digits":12}}]}  [422]
+R04 price 5 decimals         {"unit_price": "0.12345", "quantity": 1}       -> {"detail":[{"type":"decimal_max_places","loc":["body","unit_price"],"msg":"Decimal input should have no more than 4 decimal places","input":"0.12345","ctx":{"decimal_places":4}}]}  [422]
+R04 largest total            {"unit_price": "99999999.9999", "quantity": 1000} -> {"total":"99999999999.90"}  [200]
+R05 extra field              {"unit_price": "0.10", "quantity": 3, "discount": "0.5"} -> {"detail":[{"type":"extra_forbidden","loc":["body","discount"],"msg":"Extra inputs are not permitted","input":"0.5"}]}  [422]
+R05 misspelled field         {"units_price": "0.10", "quantity": 3}         -> {"detail":[{"type":"missing","loc":["body","unit_price"],"msg":"Field required","input":{"units_price":"0.10","quantity":3}},{"type":"extra_forbidden","loc":["body","units_price"],"msg":"Extra inputs are not permitted","input":"0.10"}]}  [422]
+OPEN price -0                {"unit_price": "-0", "quantity": 1}            -> {"total":"-0.00"}  [200]
+OPEN price JSON number       {"unit_price": 0.1, "quantity": 3}             -> {"total":"0.30"}  [200]
+OPEN price with spaces       {"unit_price": " 0.10 ", "quantity": 1}        -> {"total":"0.10"}  [200]
+OPEN price underscore        {"unit_price": "1_0", "quantity": 1}           -> {"total":"10.00"}  [200]
+OPEN price leading +         {"unit_price": "+0.10", "quantity": 1}         -> {"total":"0.10"}  [200]
+OPEN price exponent          {"unit_price": "1E1", "quantity": 1}           -> {"total":"10.00"}  [200]
+OPEN Arabic-Indic digits     {"unit_price": "١٢", "quantity": 1}          -> {"total":"12.00"}  [200]
+price true                   {"unit_price": true, "quantity": 1}            -> {"detail":[{"type":"decimal_type","loc":["body","unit_price"],"msg":"Decimal input should be an integer, float, string or Decimal object","input":true}]}  [422]
+price hex                    {"unit_price": "0x10", "quantity": 1}          -> {"detail":[{"type":"decimal_parsing","loc":["body","unit_price"],"msg":"Input should be a valid decimal","input":"0x10"}]}  [422]
+malformed JSON               {bad                                           -> {"detail":[{"type":"json_invalid","loc":["body",1],"msg":"JSON decode error","input":{},"ctx":{"error":"Expecting property name enclosed in double quotes"}}]}  [422]
+
+## GET /products/{product_id}
+known product                GET /products/3f2b8c1e-7a4d-4e9b-9c6f-1d2e3a4b5c6d -> {"id":"3f2b8c1e-7a4d-4e9b-9c6f-1d2e3a4b5c6d","name":"Notebook"}  [200]
+T04 malformed id             GET /products/not-a-uuid                       -> {"detail":[{"type":"uuid_parsing","loc":["path","product_id"],"msg":"Input should be a valid UUID, invalid character: found `n` at 0","input":"not-a-uuid","ctx":{"error":"invalid character: found `n` at 0"}}]}  [422]
+valid but unknown id         GET /products/00000000-0000-4000-8000-000000000000 -> {"detail":"Product not found"}  [404]
+uppercase id                 GET /products/3F2B8C1E-7A4D-4E9B-9C6F-1D2E3A4B5C6D -> {"id":"3f2b8c1e-7a4d-4e9b-9c6f-1d2e3a4b5c6d","name":"Notebook"}  [200]
+no hyphens                   GET /products/3f2b8c1e7a4d4e9b9c6f1d2e3a4b5c6d -> {"id":"3f2b8c1e-7a4d-4e9b-9c6f-1d2e3a4b5c6d","name":"Notebook"}  [200]
+urn:uuid: prefix             GET /products/urn:uuid:3f2b8c1e-7a4d-4e9b-9c6f-1d2e3a4b5c6d -> {"id":"3f2b8c1e-7a4d-4e9b-9c6f-1d2e3a4b5c6d","name":"Notebook"}  [200]
+OPEN unknown query param     GET /products/3f2b8c1e-7a4d-4e9b-9c6f-1d2e3a4b5c6d?admin=true -> {"id":"3f2b8c1e-7a4d-4e9b-9c6f-1d2e3a4b5c6d","name":"Notebook"}  [200]
+docs disabled                GET /docs                                      -> {"detail":"Not Found"}  [404]

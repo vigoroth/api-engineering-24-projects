@@ -7,14 +7,14 @@ a live measurement.
 
 ![Python](https://img.shields.io/badge/python-3.13-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.162-009688)
-![Projects](https://img.shields.io/badge/projects-1%20of%2024%20done-orange)
+![Projects](https://img.shields.io/badge/projects-2%20of%2024%20done-orange)
 
 ## Projects
 
 | # | Project | Focus | Status |
 |---:|---|---|---|
 | 01 | [Your first HTTP API](01-first-http-api/) | Routes, status codes, JSON, validation, timing and logging | ✅ Done |
-| 02 | Paths, query parameters and request schemas | Typed input validation | Planned |
+| 02 | [Paths, query parameters and request schemas](02-typed-validation/) | Decimal money, strict types, bounds, extra fields, internal vs public models | ✅ Done |
 | 03 | In-memory CRUD with correct HTTP semantics | Methods, idempotency, 201/204/409 | Planned |
 | 04 | Routers, services, repositories and dependencies | Layered architecture, dependency injection | Planned |
 | 05 | Persistence, migrations and transactions | Database, schema migrations | Planned |
@@ -52,7 +52,7 @@ NN-project-name/
 ├── tests/             automated tests (pytest)
 ├── scripts/           measurement tools
 ├── evidence/          raw measurement output
-├── docs/              theory and diagrams (PDF + LaTeX source)
+├── docs/              theory, scope, references and diagrams (PDF + LaTeX source)
 ├── requirements.txt   exact dependency versions
 └── environment.yml    conda environment
 ```

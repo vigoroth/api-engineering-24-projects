@@ -1,0 +1,402 @@
+% Theory for Project 02 — Paths, query parameters and request schemas.
+% Build (from this folder):  tectonic theory.tex   ->  theory.pdf
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=22mm]{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[table]{xcolor}
+\usepackage{fancyvrb}
+\usepackage{titlesec}
+\usepackage[colorlinks=true,linkcolor=black,urlcolor=accent]{hyperref}
+\usepackage{xurl}
+
+\definecolor{accent}{HTML}{3367D6}
+\definecolor{boxbg}{HTML}{F4F6FA}
+\titleformat{\section}{\large\bfseries\color{accent}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlist{itemsep=0.15em, topsep=0.3em}
+\renewcommand{\arraystretch}{1.25}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\ra}{$\rightarrow$}
+
+\newcommand{\keypoint}[1]{%
+  \par\smallskip\noindent\colorbox{boxbg}{\parbox{\dimexpr\linewidth-2\fboxsep}{\small #1}}\par\smallskip}
+
+\title{\textbf{Project 02 --- Paths, query parameters and request schemas}\\[0.3em]\large Theory, answers, design decision, scope and references}
+\author{APIs: 24 Build-It-Yourself Projects}
+\date{5 November 2026 \quad\textbullet\quad FastAPI 0.162.0, Pydantic 2.14.2 (core 2.50.2), Starlette 1.10.0, uvicorn 0.54.0, Python 3.13.18}
+
+\begin{document}
+\maketitle
+
+\keypoint{\textbf{How to read this.} Every claim about \emph{our} API was checked
+against the running code (TestClient, or a live uvicorn server called with curl on
+2026-11-05; raw output in \code{evidence/live-2026-11-05.txt}). Claims about
+libraries and standards link to the source in Section~\ref{sec:refs}. Where
+something was measured rather than read, the text says so.}
+
+\setcounter{tocdepth}{1}
+\tableofcontents
+
+% =====================================================================
+\section{The boundary: types are a promise to clients}
+
+An API's input types are not internal details. As soon as one client sends
+\code{"quantity": "3"} and gets a 200, that spelling is part of the contract,
+whatever the documentation says. This project therefore validates \emph{everything}
+at the boundary, before the handler runs, and writes down every case where it still
+coerces.
+
+FastAPI decides where each value comes from by its declaration:
+
+\begin{tabularx}{\linewidth}{@{}l L L@{}}
+\toprule
+\textbf{Declaration} & \textbf{Source} & \textbf{In our API} \\
+\midrule
+name inside \code{\{...\}} in the path & path segment & \code{product\_id: UUID} \\
+plain type (\code{str}, \code{int}) not in the path & query string & none in P02 (P01's \code{name}) \\
+Pydantic model & JSON body & \code{request: QuoteRequest} \\
+\bottomrule
+\end{tabularx}
+
+The first element of an error's location \code{loc} follows the same split:
+\code{path}, \code{query} or \code{body}, followed by the field name.
+
+% =====================================================================
+\section{Missing, null, invalid and zero are four different things}
+
+The workbook's central claim. Measured on the live server for \code{quantity}:
+
+\begin{tabularx}{\linewidth}{@{}l l l L@{}}
+\toprule
+\textbf{Body} & \textbf{Status} & \textbf{\code{type}} & \textbf{Meaning} \\
+\midrule
+\code{\{"unit\_price":"0.10"\}} & 422 & \code{missing} & the client did not say anything \\
+\code{"quantity": null} & 422 & \code{int\_type} & the client said ``no value'' \\
+\code{"quantity": 2.5} & 422 & \code{int\_type} & a value of the wrong type \\
+\code{"quantity": 0} & 422 & \code{greater\_than\_equal} & right type, outside the range \\
+\code{"quantity": 3} & 200 & --- & valid \\
+\bottomrule
+\end{tabularx}
+
+\textbf{Required vs optional (R01).} In Pydantic a field is required exactly when it
+has no default. \code{quantity: int = Field(ge=1)} is still required;
+\code{Field(1, ge=1)} would silently make 1 the default, and an absent quantity would
+be accepted.
+
+\textbf{Null vs absent (R02).} An optional field written as \code{x: int | None = None}
+would merge the two cases again, because both end up as \code{None}. When the
+difference matters (for example in a PATCH, ``leave unchanged'' vs ``clear''), Pydantic
+records which fields were actually sent in \code{model.model\_fields\_set}. P02 has no
+optional fields, so both cases are rejected, with different error types.
+
+% =====================================================================
+\section{Money is not a float}
+
+A binary float cannot store most decimal fractions exactly. Measured in Python 3.13:
+
+\begin{Verbatim}[fontsize=\small, frame=single, framesep=2mm]
+>>> 0.1 * 3
+0.30000000000000004
+>>> Decimal(0.1)        # the float's real value
+0.1000000000000000055511151231257827021181583404541015625
+>>> Decimal("0.10") * 3
+Decimal('0.30')
+\end{Verbatim}
+
+JSON itself has only one number type, and RFC~8259 \S6 warns that implementations
+commonly read numbers as IEEE~754 doubles. So the price travels as a \emph{string}
+(\code{"0.10"}), and the server builds a \code{Decimal} from the exact digits.
+
+\subsection{Rounding is a policy, not a default}
+
+\code{quantize(Decimal("0.01"), rounding=...)} rounds to exactly two places. Python
+offers eight rounding modes, and its default is \emph{half even}:
+
+\begin{tabularx}{\linewidth}{@{}l l l L@{}}
+\toprule
+\textbf{Value} & \textbf{\code{ROUND\_HALF\_UP}} & \textbf{\code{ROUND\_HALF\_EVEN}} & \textbf{Note} \\
+\midrule
+0.125 & 0.13 & 0.12 & 2 is even, so half even goes down \\
+0.135 & 0.14 & 0.14 & 4 is even, so half even goes up \\
+\code{round(2.675, 2)} & \multicolumn{2}{l}{2.67 (a float, really 2.67499\ldots)} & why we never round floats \\
+\bottomrule
+\end{tabularx}
+
+We chose half up because it matches what people expect on a receipt, and pinned it
+with a test (\code{0.125} \ra\ \code{"0.13"}). Half even reduces bias over many
+roundings and is common in accounting. Either is defensible. Leaving the choice
+implicit is not.
+
+\subsection{Bounds protect the arithmetic}
+
+A \code{Decimal} operation runs in a \emph{context} with a precision of 28
+significant digits by default:
+
+\begin{Verbatim}[fontsize=\small, frame=single, framesep=2mm]
+>>> Decimal("1E+100").quantize(Decimal("0.01"))   # needs 103 digits
+decimal.InvalidOperation: [<class 'decimal.InvalidOperation'>]
+\end{Verbatim}
+ Before R04 our API turned
+that into a \textbf{500} (found by probing, see EVIDENCE.md). With
+\code{max\_digits=12, decimal\_places=4} the largest total is
+$99\,999\,999.9999 \times 1000 \approx 10^{11}$, about 15 digits at most, so
+\code{quantize} can no longer fail.
+
+\keypoint{A number with no upper bound has not been validated. Bounds are needed for
+the arithmetic, not only for the business rule.}
+
+% =====================================================================
+\section{Coercion: lax vs strict}
+
+Pydantic validates in \emph{lax} mode by default: it converts values when the
+conversion seems safe. For an \code{int} field, \code{"3"} and \code{3.0} become
+\code{3}, and \code{2.5} is rejected (\code{int\_from\_float}). In \emph{strict} mode,
+only a real integer is accepted. Our choices, all observed live:
+
+\begin{tabularx}{\linewidth}{@{}l l L@{}}
+\toprule
+\textbf{Input} & \textbf{Result} & \textbf{Reason} \\
+\midrule
+\code{quantity: "3"}, \code{3.0} & 422 & \code{strict=True}: a count is an integer, nothing else \\
+\code{unit\_price: "0.10"} & 200 & the intended form; must stay lax to parse a string \\
+\code{unit\_price: 0.1} (number) & 200 & lax; the client has already lost precision \\
+\code{"1E1"}, \code{" 0.10 "}, \code{"+0.10"}, \code{"1\_0"} & 200 & Python's \code{Decimal()} grammar accepts all of them \\
+Arabic-Indic digits (U+0661 U+0662) & 200, total 12.00 & \code{Decimal()} accepts any Unicode decimal digit \\
+\code{"-0"} & 200, \code{"-0.00"} & \textbf{open bug}: $-0 \ge 0$ is true, and the sign survives \\
+\code{true}, \code{"0x10"} & 422 & not a decimal \\
+\bottomrule
+\end{tabularx}
+
+\textbf{The trade-off.} RFC~9413 (\emph{Maintaining Robust Protocols}) argues against
+the old ``be liberal in what you accept'' rule. Every tolerated variant becomes
+something clients depend on, and you can never remove it without breaking them.
+Strictness has the opposite cost: clients that send \code{"3"} break \emph{today}. We
+chose strict where coercion could change meaning (a count) and documented the lax
+cases we kept.
+
+One side effect we measured: \code{strict=True} changed the error for \code{2.5} from
+\code{int\_from\_float} to \code{int\_type}. Tests that assert on the library's
+wording break on such changes. Ours assert on status and \code{loc}.
+
+% =====================================================================
+\section{Extra fields and mass assignment}
+
+Pydantic's \code{extra} setting has three values: \code{"ignore"} (the default: unknown
+keys are dropped silently), \code{"allow"} (they are kept on the model) and
+\code{"forbid"} (422 \code{extra\_forbidden}).
+
+\begin{itemize}
+  \item \textbf{Ignore hides client bugs.} Our M1 typo \code{units\_price} produced
+  only ``\code{unit\_price} missing''. With \code{forbid}, the client gets both
+  ``\code{unit\_price} missing'' and ``\code{units\_price} not permitted'', and the typo
+  is obvious.
+  \item \textbf{Ignore misleads clients.} A client sending \code{"discount": "0.5"}
+  receives a full-price quote with a 200, and may believe the discount was applied.
+  \item \textbf{Allow invites mass assignment.} If extra keys are kept and copied into
+  storage, a client can set fields it should never control (\code{is\_admin},
+  \code{price}). OWASP lists this under API3:2023, \emph{Broken Object Property Level
+  Authorization}.
+\end{itemize}
+
+\textbf{Measured limit:} \code{extra="forbid"} lives on the body model, so unknown
+\emph{query} parameters are still ignored (\code{?admin=true} \ra\ 200). FastAPI can
+also forbid extra query parameters by declaring them as a Pydantic model with
+\code{Query()}. We did not do this in P02.
+
+% =====================================================================
+\section{Path parameters: 422 vs 404}
+
+\code{product\_id: UUID} makes the path segment go through Python's \code{UUID()}
+parser before the handler runs.
+
+\begin{itemize}
+  \item \code{/products/not-a-uuid} \ra\ \textbf{422} \code{uuid\_parsing} at
+  \code{["path","product\_id"]}: this can \emph{never} identify a product. It's a client error.
+  \item \code{/products/00000000-0000-4000-8000-000000000000} \ra\ \textbf{404}: well-formed,
+  but nothing is stored under it.
+\end{itemize}
+
+RFC~9110 defines 404 as ``the origin server did not find a current representation for
+the target resource'' (\S15.5.5) and 422 as ``unable to process the contained
+instructions'' (\S15.5.21). Returning 404 for garbage would hide client bugs.
+Returning 422 for a missing product would blame the client for a correct request.
+
+A lesson from testing: \code{test\_unknown\_but\_valid\_product\_id\_is\_404} passed
+\emph{before the route existed}, because every unknown path is a 404. A test is only
+meaningful next to one that proves the route works (the 200 test).
+
+\textbf{Accepted spellings} (measured): uppercase, no hyphens, \code{\{braces\}} and
+\code{urn:uuid:} all reach the same product. The response is always the canonical
+lowercase hyphenated form from RFC~9562. Because the dict keys are \code{UUID} objects,
+not strings, the lookup is case-independent. P15 (caching) will need to decide
+whether these are one URL or many.
+
+% =====================================================================
+\section{Internal vs public models}
+
+R06 separates two schemas for one resource:
+
+\begin{Verbatim}[fontsize=\small, frame=single, framesep=2mm]
+class ProductRecord(BaseModel):     # internal: what we store
+    id: UUID; name: str; supplier_password: str
+
+class ProductResponse(BaseModel):   # public: what clients may see
+    id: UUID; name: str
+
+@app.get("/products/{product_id}", response_model=ProductResponse)
+def get_product(product_id: UUID):
+    ...
+    return product                  # the whole record, on purpose
+\end{Verbatim}
+
+FastAPI re-validates the return value into \code{response\_model}, which drops
+undeclared fields. The handler returns the risky object deliberately, so the test
+shows that the \emph{schema} is the safety net, not the handler author's memory.
+
+\textbf{Intentional failure (measured).} Without \code{response\_model}, FastAPI
+serialized the whole record: 2 tests went red and printed the canary password.
+Restored, 22 passed. A precondition test proves the secret really is stored;
+otherwise ``the secret is absent'' would pass trivially.
+
+\textbf{What \code{response\_model} does not cover.} Headers (P01's leak experiment),
+logs, and the 422 \code{input} echo. For a \code{missing} error, \code{input} is the
+\emph{whole request body}, so anything sensitive in it is sent back. This is carried
+to P08.
+
+% =====================================================================
+\section{The workbook's four questions}
+
+\textbf{1. What information crosses the contract boundary?} In: a JSON object with
+exactly \code{unit\_price} (decimal string) and \code{quantity} (integer), or a UUID in
+the path. Out: \code{total} as a 2-place decimal string, or \code{id} + \code{name}.
+Errors: 422 with \code{type} + \code{loc} per problem, or 404. Nothing else
+(\code{supplier\_password}, stack traces) crosses.
+
+\textbf{2. Which invariant would survive a framework change?} ``The handler only ever
+sees values inside the contract'', and ``the total is \code{unit\_price $\times$ quantity}
+rounded half up to cents, as a decimal string''. The tests are written as HTTP
+requests and responses, so they would still apply to another framework. Only the
+\code{type} strings are Pydantic-specific.
+
+\textbf{3. Which failure could hide behind a successful status?} Several did:
+\code{"quantity": "3"} \ra\ 200 (silent coercion); \code{"discount"} ignored \ra\ 200
+at full price; \code{"-0"} \ra\ 200 \code{"-0.00"}; \code{?admin=true} ignored
+\ra\ 200; and the 404 test, which was green while the route didn't exist.
+
+\textbf{4. What had to be measured rather than read?} The 500 from \code{"1e100"};
+exactly which spellings \code{Decimal()} and \code{UUID()} accept (underscores and
+Unicode digits are not obvious from the docs); that \code{strict} changes error types;
+and that \code{response\_model} filters a returned model of a \emph{different} class.
+
+% =====================================================================
+\section{Design decision}
+
+\textbf{Chosen: declarative Pydantic constraints.} \code{Field(ge, le, max\_digits,
+decimal\_places, strict)} + \code{extra="forbid"} + a separate response model.
+\emph{Why:} validation is visible next to the field, runs before the handler, and
+gives structured errors (\code{type}, \code{loc}) for free. \emph{Cost:} we inherit
+the library's lax parsing (\code{Decimal()} grammar), and the \code{type} strings are
+framework-specific.
+
+\textbf{Alternative: a strict string type for \code{unit\_price}}, converted to
+\code{Decimal} afterwards:
+
+\begin{Verbatim}[fontsize=\small, frame=single, framesep=2mm]
+unit_price: str = Field(pattern=r"^\d{1,8}(\.\d{1,4})?$")
+\end{Verbatim}
+ This would reject numbers, exponents, spaces,
+\code{+}, \code{\_}, non-ASCII digits and \code{-0} all at once. \emph{Cost:} a second
+parsing step, and existing clients sending \code{0.1} as a number would break.
+
+\textbf{What would make me switch:} the first time a lax spelling causes a real
+disagreement (for example a downstream system that rejects \code{"1E1"}), or before a
+public release, while no client depends on the lax forms yet.
+
+% =====================================================================
+\section{Scope of the project}
+
+\textbf{In scope (built and tested):}
+\begin{itemize}
+  \item Two routes: \code{POST /quotes} (JSON body) and \code{GET /products/\{product\_id\}} (path).
+  \item R01 required fields, R02 null vs absent, R03 decimal arithmetic + half-up
+  rounding + strict integers, R04 numeric and digit bounds, R05 unknown body fields
+  rejected, R06 internal fields kept out of responses.
+  \item T01--T06, two boundary pairs, two regressions (\code{1e100}, the
+  \code{units\_price} typo), one intentional failure: 22 tests.
+  \item A live check of 36 requests against uvicorn, and documented coercion rules.
+\end{itemize}
+
+\textbf{Deliberately out of scope:}
+\begin{itemize}
+  \item Persistence: \code{PRODUCTS} is an in-memory dict (P05).
+  \item Custom error format: we keep FastAPI's 422 shape (P08).
+  \item Query-parameter models and unknown query parameters (noted as open).
+  \item Optional request fields and PATCH semantics (P03).
+  \item Authentication and per-user visibility of fields (P09, P10).
+  \item Latency measurement (methodology in P01), concurrency, CI.
+\end{itemize}
+
+\textbf{Known open items:} \code{"-0"} \ra\ \code{"-0.00"}; lax \code{unit\_price}
+spellings; unknown query parameters ignored; 422 echoes \code{input}; \code{HEAD}
+\ra\ 405 (from P01).
+
+% =====================================================================
+\section{References}\label{sec:refs}
+
+\subsection*{Standards}
+\begin{itemize}
+  \item RFC 9110, \emph{HTTP Semantics}: \S15.5.5 404 Not Found, \S15.5.21 422 Unprocessable Content.\\
+    \url{https://www.rfc-editor.org/rfc/rfc9110}
+  \item RFC 8259, \emph{The JSON Data Interchange Format}: \S6 Numbers (interoperability and IEEE 754).\\
+    \url{https://www.rfc-editor.org/rfc/rfc8259}
+  \item RFC 9562, \emph{Universally Unique IDentifiers (UUIDs)}.\\
+    \url{https://www.rfc-editor.org/rfc/rfc9562}
+  \item RFC 9413, \emph{Maintaining Robust Protocols} (on Postel's law and tolerance).\\
+    \url{https://www.rfc-editor.org/rfc/rfc9413}
+\end{itemize}
+
+\subsection*{Python}
+\begin{itemize}
+  \item \code{decimal}: contexts, rounding modes and \code{quantize}.\\
+    \url{https://docs.python.org/3/library/decimal.html}
+  \item Floating-Point Arithmetic: Issues and Limitations.\\
+    \url{https://docs.python.org/3/tutorial/floatingpoint.html}
+  \item \code{uuid}: UUID objects according to RFC 9562.\\
+    \url{https://docs.python.org/3/library/uuid.html}
+\end{itemize}
+
+\subsection*{Pydantic}
+\begin{itemize}
+  \item Strict mode.\quad \url{https://docs.pydantic.dev/latest/concepts/strict_mode/}
+  \item Conversion table (what lax and strict accept).\quad \url{https://docs.pydantic.dev/latest/concepts/conversion_table/}
+  \item Fields and numeric / decimal constraints.\quad \url{https://docs.pydantic.dev/latest/concepts/fields/}
+  \item Model configuration, \code{extra}.\quad \url{https://docs.pydantic.dev/latest/api/config/}
+  \item Validation error types (\code{missing}, \code{int\_type}, \code{extra\_forbidden}, \ldots).\quad \url{https://docs.pydantic.dev/latest/errors/validation_errors/}
+\end{itemize}
+
+\subsection*{FastAPI}
+\begin{itemize}
+  \item Request body.\quad \url{https://fastapi.tiangolo.com/tutorial/body/}
+  \item Path parameters.\quad \url{https://fastapi.tiangolo.com/tutorial/path-params/}
+  \item Query parameter models (forbidding extra query parameters).\quad \url{https://fastapi.tiangolo.com/tutorial/query-param-models/}
+  \item Response model, return type.\quad \url{https://fastapi.tiangolo.com/tutorial/response-model/}
+  \item Handling errors.\quad \url{https://fastapi.tiangolo.com/tutorial/handling-errors/}
+\end{itemize}
+
+\subsection*{Security}
+\begin{itemize}
+  \item OWASP API Security Top 10 (2023), API3: Broken Object Property Level Authorization.\\
+    \url{https://owasp.org/API-Security/editions/2023/en/0xa3-broken-object-property-level-authorization/}
+  \item OWASP Mass Assignment Cheat Sheet.\\
+    \url{https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html}
+\end{itemize}
+
+\end{document}
