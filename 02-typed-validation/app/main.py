@@ -21,6 +21,7 @@ class QuoteResponse(BaseModel):
 @app.post("/quotes", response_model=QuoteResponse)
 def create_quote(request: QuoteRequest):
     total = (request.unit_price * request.quantity).quantize(CENTS, rounding=ROUND_HALF_UP)
+    total = total + 0  # "-0" passes ge=0 (-0 == 0) but keeps its sign; adding 0 gives an unsigned 0.00
     return QuoteResponse(total=str(total))
 
 

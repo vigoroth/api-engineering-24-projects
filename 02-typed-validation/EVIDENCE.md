@@ -7,19 +7,19 @@ says so. Responses are copied from saved output, not retyped from memory.
 
 | Field | Evidence |
 |---|---|
-| **Project and repository revision** | Project 02, finished 2026-11-05, in [vigoroth/api-engineering-24-projects](https://github.com/vigoroth/api-engineering-24-projects) (the commit that adds this folder; parent `d8884f9`). File blobs (`git hash-object`): `app/main.py` 24870b19, `tests/test_quotes.py` 4556ff58, `tests/test_products.py` e5acafe3. |
+| **Project and repository revision** | Project 02, finished 2026-11-05, in [vigoroth/api-engineering-24-projects](https://github.com/vigoroth/api-engineering-24-projects) (added in `ed4a3c2`; the `-0` fix is the following commit). File blobs (`git hash-object`): `app/main.py` a823ec66, `tests/test_quotes.py` b2fcd890, `tests/test_products.py` e5acafe3. |
 | **Hypothesis and changed variable** | *Declarative Pydantic constraints can enforce the whole input contract (R01–R05) before any handler code runs, and a separate public response model enforces R06.* The variables changed, one per milestone: field requiredness, `Field(ge=1)`, `strict=True`, `le=1000` / `ge=0` / `max_digits` / `decimal_places`, `extra="forbid"`, and an internal `ProductRecord` vs public `ProductResponse`. |
 | **Environment and versions** | Windows 11 (10.0.26300). Conda env `apis24`: Python 3.13.18, fastapi 0.162.0, starlette 1.10.0, pydantic 2.14.2 (pydantic-core 2.50.2), uvicorn[standard] 0.54.0, httpx 0.28.1, pytest 9.2.0. curl 8.21.0. |
 | **Dataset / fixture identity** | No dataset. One seeded product: `3f2b8c1e-7a4d-4e9b-9c6f-1d2e3a4b5c6d` / `Notebook` / canary secret `canary-supplier-password-7d1f`. Unknown-but-valid ID `00000000-0000-4000-8000-000000000000`. All other inputs are literals in the tests. `PRODUCTS` is a module-level dict that no test mutates, so no cleanup is needed. |
-| **Tests written and observed outcomes** | `pytest -q` → **22 passed** (2026-11-05). Each test was seen red before green, except where noted below. |
-| **Real integration boundaries exercised** | A live uvicorn server on 127.0.0.1:8002 called with curl.exe: 36 requests, saved in [evidence/live-2026-11-05.txt](evidence/live-2026-11-05.txt). |
+| **Tests written and observed outcomes** | `pytest -q` → **23 passed** (2026-11-05, after the `-0` fix; 22 before it). Each test was seen red before green, except where noted below. |
+| **Real integration boundaries exercised** | A live uvicorn server on 127.0.0.1:8002 called with curl.exe: 36 requests, plus 3 more after the `-0` fix, saved in [evidence/live-2026-11-05.txt](evidence/live-2026-11-05.txt). |
 | **Known mocks and untested assumptions** | The pytest suite uses **TestClient** (in-memory ASGI, no socket, no uvicorn). The live curl run is the only real-server check, and it was done by hand, not automated. `PRODUCTS` is an in-memory dict standing in for a database (P05). |
 | **Measured quality / latency / resources** | Not measured in this project. P02 is about correctness of the input contract; latency methodology is in P01. No number is claimed. |
 | **Cost assumptions vs measured consumption** | Nothing billable ran: laptop only. |
-| **One inspected failure and its cause** | Three are below: `"1e100"` → 500 (found and fixed), `"-0"` → `"-0.00"` (found, **open**), and the intentional removal of `response_model`. |
-| **Decision and next change** | Keep declarative constraints, with `strict` only where coercion is dangerous (reasoning in [docs/theory.pdf](docs/theory.pdf), "Design decision"). Next: fix `-0`; decide on a strict `unit_price` pattern; then Project 03. |
+| **One inspected failure and its cause** | Three are below: `"1e100"` → 500 (found and fixed), `"-0"` → `"-0.00"` (found and fixed), and the intentional removal of `response_model`. |
+| **Decision and next change** | Keep declarative constraints, with `strict` only where coercion is dangerous (reasoning in [docs/theory.pdf](docs/theory.pdf), "Design decision"). Next: decide on a strict `unit_price` pattern; then Project 03. |
 
-## Tests (22)
+## Tests (23)
 
 | Area | Test | Red first? | Covers |
 |---|---|---|---|
@@ -37,6 +37,7 @@ says so. Responses are copied from saved output, not retyped from memory.
 | R04 | `test_r04_negative_price_is_rejected` | yes (200 `"-0.01"`) | `-0.01` → 422 |
 | R04 regression | `test_r04_huge_price_is_rejected_not_a_server_error` | yes (`InvalidOperation`) | `"1e100"` → 422, not 500 (**independently discovered**) |
 | R04 | `test_r04_too_many_decimal_places_is_rejected` | yes (200) | `0.12345` → 422 |
+| R04 regression | `test_r04_negative_zero_price_gives_unsigned_zero_total` | yes (`"-0.00"`) | `"-0"` → `{"total":"0.00"}` (**independently discovered**, Failure 2) |
 | T05 | `test_t05_missing_price_reports_field_location` | no, passed at once | `missing` at `body.unit_price` |
 | R05 | `test_r05_unknown_field_is_rejected` | yes (200) | `discount` → `extra_forbidden` at `body.discount` |
 | R05 regression | `test_r05_misspelled_field_reports_both_problems` | yes (only `missing`) | `units_price` → `missing` + `extra_forbidden` (compared as a set) |
@@ -46,7 +47,7 @@ says so. Responses are copied from saved output, not retyped from memory.
 | T06 precondition | `test_t06_internal_field_exists_in_storage` | yes (`AttributeError`) | the secret really is stored, so the leak test isn't vacuous |
 | T06, R06 | `test_t06_internal_field_is_absent_from_public_response` | yes, in the intentional failure below | key absent from JSON; canary absent from body text and headers |
 
-**Test layers (TEST_SPEC task).** All 22 are in-memory HTTP tests through TestClient.
+**Test layers (TEST_SPEC task).** All 23 are in-memory HTTP tests through TestClient.
 `test_t06_internal_field_exists_in_storage` also reads the app's internal
 `PRODUCTS` dict (white-box, on purpose). None are real integration tests. The real
 server boundary was checked by hand with curl. There are no concurrency or recovery
@@ -71,7 +72,7 @@ stayed green only because it asserts on status and `loc`, not on library wording
 - **Green:** 14/14. **Live:** 422 `decimal_max_digits`.
 - **Lesson:** a number with no upper bound is not validated. Bounds protect the arithmetic, not just the business rule.
 
-## Failure 2 — independently discovered: `"-0"` → `"-0.00"` (open)
+## Failure 2 — independently discovered: `"-0"` → `"-0.00"` (fixed)
 
 - **Found:** the live curl probe during M7.
 - **Observed:** `{"unit_price": "-0", "quantity": 1}` → **200 `{"total":"-0.00"}`**.
@@ -80,9 +81,17 @@ stayed green only because it asserts on status and `loc`, not on library wording
 - **Impact:** a client that shows or parses the total gets a minus sign on a zero quote.
   There's no money error, but the response breaks the "nonnegative" promise in its
   text form.
-- **Status:** not fixed in this project. A fix is to normalize the result
-  (for example `total + 0`, which turns `-0.00` into `0.00`), with a regression test
-  `"-0"` → `"0.00"`.
+- **Red:** `test_r04_negative_zero_price_gives_unsigned_zero_total` failed with
+  `{'total': '-0.00'} != {'total': '0.00'}` (1 failed, 22 passed).
+- **Fix:** `total = total + 0` right after `quantize`. In Decimal arithmetic,
+  `-0.00 + 0` is `0.00` (the sum of zeros with different signs is positive under
+  every rounding mode except `ROUND_FLOOR`), and nonzero totals are unchanged.
+  Rejecting `-0` at the boundary was the alternative, but `-0` *is* a valid zero, so
+  normalizing the output is less surprising.
+- **Green:** 23 passed. **Live:** `"-0"` and `"-0.00"` → `{"total":"0.00"}` (end of
+  [evidence/live-2026-11-05.txt](evidence/live-2026-11-05.txt)).
+- **Lesson:** a range check compares *values*, and `-0 == 0`. The *text form* the
+  client sees needs its own test.
 
 ## Failure 3 — intentional: removing `response_model` from `GET /products/{id}`
 
@@ -99,7 +108,7 @@ E          'supplier_password': 'canary-supplier-password-7d1f'}
 2 failed, 20 passed
 ```
 
-Restored → 22 passed. Two separate tests catch the same leak in two different ways:
+Restored → 22 passed (before the `-0` test was added). Two separate tests catch the same leak in two different ways:
 the exact-body comparison and the canary check.
 
 ## Mistakes made during the build (kept because they taught something)
@@ -117,7 +126,6 @@ the exact-body comparison and the canary check.
 
 ## Not run / still open
 
-- `"-0"` → `"-0.00"` (Failure 2).
 - `unit_price` is lax: it accepts JSON numbers, exponents, surrounding spaces, `+`, `_`
   separators and non-ASCII Unicode digits (all seen live). Documented in the README, not tested.
 - Unknown **query parameters** are ignored (`?admin=true` → 200). R05 is enforced on the body only.

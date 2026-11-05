@@ -115,3 +115,9 @@ def test_r05_misspelled_field_reports_both_problems():
         ("missing", ("body", "unit_price")),
         ("extra_forbidden", ("body", "units_price")),
     }
+
+
+def test_r04_negative_zero_price_gives_unsigned_zero_total():
+    response = client.post("/quotes", json={"unit_price": "-0", "quantity": 1})
+    assert response.status_code == 200
+    assert response.json() == {"total": "0.00"}

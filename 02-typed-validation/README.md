@@ -35,7 +35,7 @@ On Windows you can double-click `run.bat` instead (or `run.bat 8001` for another
 python -m pytest -q
 ```
 
-Expected: `22 passed`.
+Expected: `23 passed`.
 
 ## The contract
 
@@ -145,6 +145,7 @@ clients depend on them.
 - `total = (unit_price × quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)`.
 - **Half up**, not Python's default half even: `0.125` → `0.13` (half even would give `0.12`).
 - Always exactly 2 decimal places: `"0"` → `"0.00"`.
+- Never a signed zero: `"-0"` → `"0.00"` (`total + 0` after `quantize`).
 
 ### Bounds and why they are safe
 
@@ -163,7 +164,7 @@ which became a **500**.
 | `unit_price: 0.1` (JSON number) | ✅ → `0.10` | ⚠️ accepted; a float's precision is already lost at the client |
 | `unit_price: "1E1"`, `" 0.10 "`, `"+0.10"`, `"1_0"` | ✅ | ⚠️ Python's `Decimal()` accepts exponents, surrounding spaces, `+` and `_` separators |
 | `unit_price: "١٢"` (Arabic-Indic digits) | ✅ → `12` | ⚠️ `Decimal()` accepts any Unicode decimal digit |
-| `unit_price: "-0"` | ✅ → `"-0.00"` | ⚠️ **bug, open**: −0 passes `ge=0` and keeps its sign |
+| `unit_price: "-0"`, `"-0.00"` | ✅ → `"0.00"` | −0 passes `ge=0` (−0 == 0). The total is normalized with `+ 0`, so the sign never reaches the client (was `"-0.00"`, fixed 2026-11-05) |
 | `unit_price: true`, `"0x10"` | ❌ 422 | not a decimal |
 | `product_id` in uppercase, without hyphens, `{…}` or `urn:uuid:` | ✅ | Python's `UUID()` accepts all of them; the response always uses the canonical lowercase form |
 
@@ -187,5 +188,5 @@ decision, the **project scope** and **links to every reference**.
 
 ## Evidence
 
-Test results, the two independently found failures, the intentional failure and
+Test results, the two independently found (and fixed) failures, the intentional failure and
 what is untested: [`EVIDENCE.md`](EVIDENCE.md). Raw live output: [`evidence/`](evidence/).

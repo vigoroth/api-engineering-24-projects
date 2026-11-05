@@ -170,7 +170,7 @@ only a real integer is accepted. Our choices, all observed live:
 \code{unit\_price: 0.1} (number) & 200 & lax; the client has already lost precision \\
 \code{"1E1"}, \code{" 0.10 "}, \code{"+0.10"}, \code{"1\_0"} & 200 & Python's \code{Decimal()} grammar accepts all of them \\
 Arabic-Indic digits (U+0661 U+0662) & 200, total 12.00 & \code{Decimal()} accepts any Unicode decimal digit \\
-\code{"-0"} & 200, \code{"-0.00"} & \textbf{open bug}: $-0 \ge 0$ is true, and the sign survives \\
+\code{"-0"} & 200, \code{"0.00"} & $-0 \ge 0$ is true; the sign used to survive (\code{"-0.00"}), now normalized \\
 \code{true}, \code{"0x10"} & 422 & not a decimal \\
 \bottomrule
 \end{tabularx}
@@ -263,7 +263,7 @@ shows that the \emph{schema} is the safety net, not the handler author's memory.
 
 \textbf{Intentional failure (measured).} Without \code{response\_model}, FastAPI
 serialized the whole record: 2 tests went red and printed the canary password.
-Restored, 22 passed. A precondition test proves the secret really is stored;
+Restored, all green again. A precondition test proves the secret really is stored;
 otherwise ``the secret is absent'' would pass trivially.
 
 \textbf{What \code{response\_model} does not cover.} Headers (P01's leak experiment),
@@ -288,7 +288,7 @@ requests and responses, so they would still apply to another framework. Only the
 
 \textbf{3. Which failure could hide behind a successful status?} Several did:
 \code{"quantity": "3"} \ra\ 200 (silent coercion); \code{"discount"} ignored \ra\ 200
-at full price; \code{"-0"} \ra\ 200 \code{"-0.00"}; \code{?admin=true} ignored
+at full price; \code{"-0"} \ra\ 200 \code{"-0.00"} (now fixed); \code{?admin=true} ignored
 \ra\ 200; and the 404 test, which was green while the route didn't exist.
 
 \textbf{4. What had to be measured rather than read?} The 500 from \code{"1e100"};
@@ -313,7 +313,7 @@ framework-specific.
 unit_price: str = Field(pattern=r"^\d{1,8}(\.\d{1,4})?$")
 \end{Verbatim}
  This would reject numbers, exponents, spaces,
-\code{+}, \code{\_}, non-ASCII digits and \code{-0} all at once. \emph{Cost:} a second
+\code{+}, \code{\_} and non-ASCII digits all at once. \emph{Cost:} a second
 parsing step, and existing clients sending \code{0.1} as a number would break.
 
 \textbf{What would make me switch:} the first time a lax spelling causes a real
@@ -329,8 +329,8 @@ public release, while no client depends on the lax forms yet.
   \item R01 required fields, R02 null vs absent, R03 decimal arithmetic + half-up
   rounding + strict integers, R04 numeric and digit bounds, R05 unknown body fields
   rejected, R06 internal fields kept out of responses.
-  \item T01--T06, two boundary pairs, two regressions (\code{1e100}, the
-  \code{units\_price} typo), one intentional failure: 22 tests.
+  \item T01--T06, two boundary pairs, three regressions (\code{1e100}, \code{-0}, the
+  \code{units\_price} typo), one intentional failure: 23 tests.
   \item A live check of 36 requests against uvicorn, and documented coercion rules.
 \end{itemize}
 
@@ -344,7 +344,7 @@ public release, while no client depends on the lax forms yet.
   \item Latency measurement (methodology in P01), concurrency, CI.
 \end{itemize}
 
-\textbf{Known open items:} \code{"-0"} \ra\ \code{"-0.00"}; lax \code{unit\_price}
+\textbf{Known open items:} lax \code{unit\_price}
 spellings; unknown query parameters ignored; 422 echoes \code{input}; \code{HEAD}
 \ra\ 405 (from P01).
 
