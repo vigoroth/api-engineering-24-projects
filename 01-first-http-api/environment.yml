@@ -1,0 +1,11 @@
+# Rebuild the environment with:
+#   conda env create -f environment.yml
+#   conda activate apis24
+name: apis24
+channels:
+  - defaults
+dependencies:
+  - python=3.13
+  - pip
+  - pip:
+      - -r requirements.txt

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Local settings and secrets
+.env
+.env.*
+
+# LaTeX intermediates (the PDFs are committed)
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

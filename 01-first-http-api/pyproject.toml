@@ -1,0 +1,7 @@
+# Project-wide tool settings. Only pytest is configured for now.
+[tool.pytest.ini_options]
+# Put the project root on sys.path so tests can `import app.main`
+# no matter how pytest is launched (`pytest` or `python -m pytest`).
+pythonpath = ["."]
+# Only look for tests inside tests/
+testpaths = ["tests"]

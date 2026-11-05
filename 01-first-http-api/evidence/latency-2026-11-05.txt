@@ -1,0 +1,12 @@
+# Latency measurement, 2026-11-05 13:27
+# Machine: Windows-11-10.0.26300-SP0 Intel64 Family 6 Model 186 Stepping 3, GenuineIntel
+# Python 3.13.18, fastapi 0.162.0, uvicorn 0.54.0, httpx 0.28.1
+# Server: uvicorn app.main:app --no-access-log --log-config logging.json (dev server, 1 process, localhost:8000)
+# Client: scripts/measure.py, sequential requests over one keep-alive connection
+# Command: python scripts/measure.py 1000
+
+1000 requests per route to http://127.0.0.1:8000 (after 10 warm-up requests)
+route              status client p50    p95    max server p50    p95   (ms)
+/health               200       0.84   1.81   4.46       0.30   0.68
+/hello?name=Nick      200       0.87   1.66   3.21       0.33   0.62
+/nope                 404       0.62   1.22   5.87       0.09   0.14

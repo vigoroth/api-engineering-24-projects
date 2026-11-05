@@ -1,0 +1,13 @@
+# Python bytecode caches
+__pycache__/
+*.pyc
+
+# Tool caches
+.pytest_cache/
+
+# Local virtual environments (if someone uses venv instead of conda)
+.venv/
+venv/
+
+# Never commit secrets
+.env
