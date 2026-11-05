@@ -62,6 +62,8 @@ Deliverables in `01-first-http-api/`: `app/main.py`, `tests/test_api.py` (34 pas
 
 ## Tooling notes (this PC)
 
+- GitHub: https://github.com/vigoroth/api-engineering-24-projects (public, created 2026-11-05). This `solutions/` folder is the repo root; each project is a subfolder with its own README, and the root README holds the 24-project table. Commit author is `Nick Kantiotis <62105877+vigoroth@users.noreply.github.com>` (set per repo), with no co-author lines. gh has two accounts: `vigoroth` (personal, active) and `nkantiotis`. Switch with `gh auth switch`. After each finished project: update the root README table and badge, then commit and push.
+
 - Run command: `uvicorn app.main:app --no-access-log --log-config logging.json`, or double-click `run.bat` (`run.bat 8001` for another port). Copy `run.bat` into each new project. "Port already in use" (Errno 10048) means a server is already running.
 - In Git Bash, bare `python`/`python3` hangs (Windows Store alias): use `envs\apis24\python.exe`. `conda run` can't run multi-line `python -c`.
 - Git Bash's `curl`, `timeout` and `sort` are blocked: use `C:\Windows\System32\curl.exe`.
